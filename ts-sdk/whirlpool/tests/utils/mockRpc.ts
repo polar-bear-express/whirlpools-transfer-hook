@@ -27,6 +27,7 @@ import { setupConfigAndFeeTiers } from "./program";
 import { getAddMemoInstruction } from "@solana-program/memo";
 import { randomUUID } from "crypto";
 import { getNextKeypair } from "./keypair";
+import { TEST_TRANSFER_HOOK_PROGRAM_ID } from "./transferHooks";
 
 export const signer = getNextKeypair();
 setDefaultFunder(signer);
@@ -38,29 +39,39 @@ function toBytes(address: Address): Uint8Array {
 let _testContext: ProgramTestContext | null = null;
 export async function getTestContext(): Promise<ProgramTestContext> {
   if (_testContext == null) {
-    _testContext = await startAnchor(
-      "../../",
-      [
-        // HACK: token_2022.20250510.so must exist in /target/deploy
-        // Once we upgrade the development environment with the newer token-2022 program, we can remove this.
+    try {
+      _testContext = await startAnchor(
+        "../../",
         [
-          "token_2022.20250510",
-          toBytes(address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")),
+          // HACK: token_2022.20250510.so must exist in /target/deploy
+          // Once we upgrade the development environment with the newer token-2022 program, we can remove this.
+          [
+            "token_2022.20250510",
+            toBytes(address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")),
+          ],
+          // Transfer hook program for testing transfer hook extensions
+          [
+            "transfer_hook_counter",
+            toBytes(address(TEST_TRANSFER_HOOK_PROGRAM_ID)),
+          ],
         ],
-      ],
-      [
         [
-          toBytes(signer.address),
-          new Account(
-            BigInt(100e9),
-            new Uint8Array(),
-            toBytes(SYSTEM_PROGRAM_ADDRESS),
-            false,
-            0n,
-          ),
+          [
+            toBytes(signer.address),
+            new Account(
+              BigInt(100e9),
+              new Uint8Array(),
+              toBytes(SYSTEM_PROGRAM_ADDRESS),
+              false,
+              0n,
+            ),
+          ],
         ],
-      ],
-    );
+      );
+    } catch (error) {
+      // Re-throw with more context about what files might be missing
+      throw new Error(`Failed to start Anchor test environment. This usually means program files are missing from target/deploy/. Original error: ${error}`);
+    }
 
     const configAddress = await setupConfigAndFeeTiers();
     setWhirlpoolsConfig(configAddress);

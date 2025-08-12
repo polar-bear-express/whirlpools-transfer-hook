@@ -1,7 +1,6 @@
 import { describe, it, beforeAll } from "vitest";
 import { rpc, sendTransaction, signer } from "./utils/mockRpc";
-import { setupMintTETransferHook } from "./utils/tokenExtensions";
-import { setupAta } from "./utils/token";
+import { setupMintTETransferHook, setupAtaTE, setupMintTE } from "./utils/tokenExtensions";
 import { setupConfigAndFeeTiers } from "./utils/program";
 import {
   createSplashPoolInstructions,
@@ -9,6 +8,46 @@ import {
   openFullRangePositionInstructions,
   swapInstructions,
 } from "../src";
+import { 
+  getInitializeTokenBadgeInstruction, 
+  getTokenBadgeAddress, 
+  getWhirlpoolsConfigExtensionAddress,
+  fetchMaybeTokenBadge,
+  fetchMaybeWhirlpoolsConfigExtension,
+  fetchMaybeWhirlpool
+} from "@orca-so/whirlpools-client";
+import assert from "assert";
+import { assertAccountExists } from "@solana/kit";
+import { setWhirlpoolsConfig } from "../src/config";
+
+// Helper function to initialize token badge for a mint
+async function initializeTokenBadge(mint: any, configAddress: any) {
+  const tokenBadgeAddress = await getTokenBadgeAddress(configAddress, mint);
+  const configExtensionAddress = await getWhirlpoolsConfigExtensionAddress(configAddress);
+  
+  // Check if config extension exists before trying to initialize token badge
+  const configExtensionAccount = await fetchMaybeWhirlpoolsConfigExtension(rpc, configExtensionAddress[0]);
+  if (!configExtensionAccount.exists) {
+    throw new Error(`Config extension account ${configExtensionAddress[0]} does not exist!`);
+  }
+  
+  const instruction = getInitializeTokenBadgeInstruction({
+    whirlpoolsConfig: configAddress,
+    whirlpoolsConfigExtension: configExtensionAddress[0],
+    tokenBadgeAuthority: signer,
+    tokenMint: mint,
+    tokenBadge: tokenBadgeAddress[0],
+    funder: signer,
+  });
+  
+  await sendTransaction([instruction]);
+  
+  // Verify the token badge was created
+  const verifyTokenBadge = await fetchMaybeTokenBadge(rpc, tokenBadgeAddress[0]);
+  if (!verifyTokenBadge.exists) {
+    throw new Error(`Token badge ${tokenBadgeAddress[0]} was not created successfully!`);
+  }
+}
 
 describe("Transfer Hook Support", () => {
   let config: any;
@@ -18,13 +57,20 @@ describe("Transfer Hook Support", () => {
   beforeAll(async () => {
     config = await setupConfigAndFeeTiers();
     
+    // Update the global config to match the test config
+    await setWhirlpoolsConfig(config);
+    
     // Create two mints with transfer hook extensions
     mintA = await setupMintTETransferHook({ decimals: 6 });
-    mintB = await setupMintTETransferHook({ decimals: 6 });
+    mintB = await setupMintTE({ decimals: 6 }); // Normal Token-2022 mint without extensions
+    
+    // Initialize token badges for transfer hook mints (required by Whirlpool)
+    await initializeTokenBadge(mintA, config);
+    // await initializeTokenBadge(mintB, config);
     
     // Set up token accounts
-    await setupAta(mintA, { amount: 1000000000 });
-    await setupAta(mintB, { amount: 1000000000 });
+    await setupAtaTE(mintA, { amount: 1000000000 });
+    await setupAtaTE(mintB, { amount: 1000000000 });
   });
 
   describe("Pool Creation with Transfer Hooks", () => {
@@ -34,34 +80,43 @@ describe("Transfer Hook Support", () => {
       const { instructions, poolAddress } = await createSplashPoolInstructions(
         rpc,
         mintA,
-        mintB,
+        mintB, 
         price
       );
 
-      // This test will fail initially because createSplashPoolInstructions 
-      // uses remainingAccountsInfo: null, but transfer hook tokens require
-      // additional accounts to be passed through remainingAccountsInfo
+      // Verify pool doesn't exist before creation
+      const poolBefore = await fetchMaybeWhirlpool(rpc, poolAddress);
+      assert.strictEqual(poolBefore.exists, false);
+
       await sendTransaction(instructions);
       
-      // TODO: Once implementation is complete, verify:
-      // - Pool is created successfully
-      // - Transfer hook accounts are properly resolved and passed
-      // - Pool state is correct
+      // Verify pool was created successfully
+      const poolAfter = await fetchMaybeWhirlpool(rpc, poolAddress);
+      assertAccountExists(poolAfter);
+      assert.strictEqual(poolAfter.data.tokenMintA, mintA);
+      assert.strictEqual(poolAfter.data.tokenMintB, mintB);      
     });
 
-    it("should create splash pool with mixed tokens (one with transfer hook, one without)", async () => {
+    it("should create splash pool with both transfer hook token mints", async () => {
       // Create one normal mint and one with transfer hook
-      const normalMint = await setupMintTETransferHook({ decimals: 6 }); // TODO: Change to normal mint once we have that utility
+      const transferHookMint = await setupMintTETransferHook({ decimals: 6 });
+      await initializeTokenBadge(transferHookMint, config);
+      await setupAtaTE(transferHookMint, { amount: 1000000000 });
       
-      const { instructions } = await createSplashPoolInstructions(
+      const { instructions, poolAddress } = await createSplashPoolInstructions(
         rpc,
         mintA, // transfer hook mint
-        normalMint, // normal mint
+        transferHookMint, // transfer hook mint
         1.0
       );
 
-      // Should work with mixed token types once implemented
       await sendTransaction(instructions);
+      
+      // Verify pool was created successfully
+      const poolAfter = await fetchMaybeWhirlpool(rpc, poolAddress);
+      assertAccountExists(poolAfter);
+      assert.strictEqual(poolAfter.data.tokenMintA, mintA);
+      assert.strictEqual(poolAfter.data.tokenMintB, transferHookMint);
     });
   });
 

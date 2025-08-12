@@ -9,8 +9,10 @@ import {
   getInitializeTransferFeeConfigInstruction,
   getSetTransferFeeInstruction,
   getInitializeScaledUiAmountMintInstruction,
+  getInitializeTransferHookInstruction,
 } from "@solana-program/token-2022";
 import type { Address, IInstruction } from "@solana/kit";
+import { address } from "@solana/kit";
 import { sendTransaction, signer } from "./mockRpc";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import { DEFAULT_ADDRESS } from "../../src/config";
@@ -91,6 +93,15 @@ export async function setupMintTE(
             mint: keypair.address,
             authority: signer.address,
             multiplier: 1,
+          }),
+        );
+        break;
+      case "TransferHook":
+        instructions.push(
+          getInitializeTransferHookInstruction({
+            mint: keypair.address,
+            authority: extension.authority,
+            programId: extension.programId,
           }),
         );
         break;
@@ -185,7 +196,7 @@ export async function setupMintTETransferHook(
       {
         __kind: "TransferHook",
         authority: signer.address,
-        programId: TEST_TRANSFER_HOOK_PROGRAM_ID,
+        programId: address(TEST_TRANSFER_HOOK_PROGRAM_ID),
       },
     ],
   });

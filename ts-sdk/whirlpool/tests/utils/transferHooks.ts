@@ -11,7 +11,7 @@ import { getNextKeypair } from "./keypair";
 
 // Transfer hook program ID from legacy SDK tests
 // This should match the transfer hook program used in legacy SDK
-export const TEST_TRANSFER_HOOK_PROGRAM_ID = "7N4HggYEJAtCLJdnHGCtFqfxcB5rhQCsQTze3ftYstVj";
+export const TEST_TRANSFER_HOOK_PROGRAM_ID = "EBZDYx7599krFc4m2govwBdZcicr4GgepqC78m71nsHS";
 
 /**
  * Creates a Token-2022 mint with transfer hook extension enabled.
