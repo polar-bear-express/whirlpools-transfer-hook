@@ -1,6 +1,7 @@
 import { describe, it, beforeAll } from "vitest";
 import { rpc, sendTransaction, signer } from "./utils/mockRpc";
 import { setupMintTETransferHook, setupAtaTE, setupMintTE } from "./utils/tokenExtensions";
+import { createInitializeExtraAccountMetaListInstruction } from "./utils/transferHooks";
 import { setupConfigAndFeeTiers } from "./utils/program";
 import {
   createSplashPoolInstructions,
@@ -14,11 +15,15 @@ import {
   getWhirlpoolsConfigExtensionAddress,
   fetchMaybeTokenBadge,
   fetchMaybeWhirlpoolsConfigExtension,
-  fetchMaybeWhirlpool
+  fetchMaybeWhirlpool,
+  fetchMaybePosition,
+  getPositionAddress
 } from "@orca-so/whirlpools-client";
 import assert from "assert";
 import { assertAccountExists } from "@solana/kit";
 import { setWhirlpoolsConfig } from "../src/config";
+import { fetchToken, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import { findAssociatedTokenPda } from "@solana-program/token";
 
 // Helper function to initialize token badge for a mint
 async function initializeTokenBadge(mint: any, configAddress: any) {
@@ -63,6 +68,13 @@ describe("Transfer Hook Support", () => {
     // Create two mints with transfer hook extensions
     mintA = await setupMintTETransferHook({ decimals: 6 });
     mintB = await setupMintTE({ decimals: 6 }); // Normal Token-2022 mint without extensions
+    
+    // Initialize extra account meta list for transfer hook mint (required for transfer hook to work)
+    const initializeExtraAccountMetasInstruction = createInitializeExtraAccountMetaListInstruction(
+      signer.address,
+      mintA
+    );
+    await sendTransaction([initializeExtraAccountMetasInstruction]);
     
     // Initialize token badges for transfer hook mints (required by Whirlpool)
     await initializeTokenBadge(mintA, config);
@@ -123,16 +135,39 @@ describe("Transfer Hook Support", () => {
   describe("Liquidity Operations with Transfer Hooks", () => {
     it("should open full range position with transfer hook tokens", async () => {
       // First create a pool
-      const { poolAddress } = await createSplashPoolInstructions(
+      const { instructions: poolInstructions, poolAddress } = await createSplashPoolInstructions(
         rpc,
         mintA,
         mintB,
         1.0
       );
 
+      await sendTransaction(poolInstructions);
+      const poolAfter = await fetchMaybeWhirlpool(rpc, poolAddress);
+      assertAccountExists(poolAfter);
+      assert.strictEqual(poolAfter.data.tokenMintA, mintA);
+      assert.strictEqual(poolAfter.data.tokenMintB, mintB);
+
       const param = { tokenA: 1000000n };
       
-      const { instructions, positionMint } = await openFullRangePositionInstructions(
+      // Get ATA addresses for token balance verification
+      const ataA = await findAssociatedTokenPda({
+        owner: signer.address,
+        mint: mintA,
+        tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+      }).then((x) => x[0]);
+      
+      const ataB = await findAssociatedTokenPda({
+        owner: signer.address,
+        mint: mintB,
+        tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+      }).then((x) => x[0]);
+
+      // Get token balances before opening position
+      const tokenABefore = await fetchToken(rpc, ataA);
+      const tokenBBefore = await fetchToken(rpc, ataB);
+      
+      const { instructions, positionMint, quote } = await openFullRangePositionInstructions(
         rpc,
         poolAddress,
         param,
@@ -144,7 +179,25 @@ describe("Transfer Hook Support", () => {
       // but should work once transfer hook support is implemented
       await sendTransaction(instructions);
       
-      // TODO: Verify position is created and liquidity is added correctly
+      // Verify position was created successfully
+      const positionAddress = await getPositionAddress(positionMint);
+      const position = await fetchMaybePosition(rpc, positionAddress[0]);
+      assertAccountExists(position);
+      
+      // Verify liquidity was added to the position
+      assert.strictEqual(position.data.liquidity, quote.liquidityDelta, "Position should have the expected liquidity");
+      assert(position.data.liquidity > 0n, "Position should have liquidity greater than 0");
+      
+      // Verify token balances changed correctly (tokens were spent)
+      const tokenAAfter = await fetchToken(rpc, ataA);
+      const tokenBAfter = await fetchToken(rpc, ataB);
+      
+      const tokenASpent = tokenABefore.data.amount - tokenAAfter.data.amount;
+      const tokenBSpent = tokenBBefore.data.amount - tokenBAfter.data.amount;
+      
+      assert.strictEqual(tokenASpent, quote.tokenEstA, "Token A spent should match quote estimate");
+      assert.strictEqual(tokenBSpent, quote.tokenEstB, "Token B spent should match quote estimate");
+      assert(tokenASpent > 0n, "Should have spent some token A");
     });
 
     it("should increase liquidity on existing position with transfer hook tokens", async () => {
@@ -193,8 +246,8 @@ describe("Transfer Hook Support", () => {
       
       const { instructions } = await swapInstructions(
         rpc,
-        poolAddress,
         swapParam,
+        poolAddress,
         100, // slippage
         signer
       );
@@ -223,8 +276,8 @@ describe("Transfer Hook Support", () => {
       
       const { instructions } = await swapInstructions(
         rpc,
-        poolAddress,
         swapParam,
+        poolAddress,
         100, // slippage
         signer
       );
