@@ -1,9 +1,11 @@
 import {
   fetchAllMaybeTickArray,
   fetchWhirlpool,
+  fetchMaybeWhirlpoolsConfigExtension,
   getFeeTierAddress,
   getIncreaseLiquidityV2Instruction,
   getInitializeConfigInstruction,
+  getInitializeConfigExtensionInstruction,
   getInitializeFeeTierInstruction,
   getInitializePoolV2Instruction,
   getInitializeDynamicTickArrayInstruction,
@@ -13,6 +15,7 @@ import {
   getTickArrayAddress,
   getTokenBadgeAddress,
   getWhirlpoolAddress,
+  getWhirlpoolsConfigExtensionAddress,
 } from "@orca-so/whirlpools-client";
 import {
   getInitializableTickIndex,
@@ -48,6 +51,17 @@ export async function setupConfigAndFeeTiers(): Promise<Address> {
       collectProtocolFeesAuthority: signer.address,
       rewardEmissionsSuperAuthority: signer.address,
       defaultProtocolFeeRate: 100,
+    }),
+  );
+
+  // Initialize config extension (required for token badges)
+  const configExtensionAddress = await getWhirlpoolsConfigExtensionAddress(keypair.address);
+  instructions.push(
+    getInitializeConfigExtensionInstruction({
+      config: keypair.address,
+      configExtension: configExtensionAddress[0],
+      funder: signer,
+      feeAuthority: signer,
     }),
   );
 
@@ -91,6 +105,14 @@ export async function setupConfigAndFeeTiers(): Promise<Address> {
   );
 
   await sendTransaction(instructions);
+  
+  // Verify config extension was created
+  const configExtensionAccount = await fetchMaybeWhirlpoolsConfigExtension(rpc, configExtensionAddress[0]);
+  if (!configExtensionAccount.exists) {
+    throw new Error(`Config extension account ${configExtensionAddress[0]} was not created successfully!`);
+  }
+  console.log(`✅ Debug: Config extension successfully created at ${configExtensionAddress[0]}`);
+  
   return keypair.address;
 }
 

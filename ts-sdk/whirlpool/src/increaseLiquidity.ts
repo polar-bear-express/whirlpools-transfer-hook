@@ -63,6 +63,12 @@ import { MEMO_PROGRAM_ADDRESS } from "@solana-program/memo";
 import assert from "assert";
 import { calculateMinimumBalanceForRentExemption } from "./sysvar";
 import { wrapFunctionWithExecution } from "./actionHelpers";
+import { 
+  getTransferHookAccountsForPool, 
+  buildTransferHookRemainingAccountsInfo,
+  getAllTransferHookAccounts,
+  convertToInstructionAccount 
+} from "./transferHook";
 
 // TODO: allow specify number as well as bigint
 // TODO: transfer hook
@@ -244,29 +250,58 @@ export async function increaseLiquidityInstructions(
 
   // Since position exists tick arrays must also already exist
 
-  instructions.push(
-    getIncreaseLiquidityV2Instruction({
-      whirlpool: whirlpool.address,
-      positionAuthority: authority,
-      position: position.address,
-      positionTokenAccount,
-      tokenOwnerAccountA: tokenAccountAddresses[whirlpool.data.tokenMintA],
-      tokenOwnerAccountB: tokenAccountAddresses[whirlpool.data.tokenMintB],
-      tokenVaultA: whirlpool.data.tokenVaultA,
-      tokenVaultB: whirlpool.data.tokenVaultB,
-      tokenMintA: whirlpool.data.tokenMintA,
-      tokenMintB: whirlpool.data.tokenMintB,
-      tokenProgramA: mintA.programAddress,
-      tokenProgramB: mintB.programAddress,
-      tickArrayLower,
-      tickArrayUpper,
-      liquidityAmount: quote.liquidityDelta,
-      tokenMaxA: quote.tokenMaxA,
-      tokenMaxB: quote.tokenMaxB,
-      memoProgram: MEMO_PROGRAM_ADDRESS,
-      remainingAccountsInfo: null,
-    }),
+  // Resolve transfer hook accounts for both token A and B
+  const { transferHookAccountsA, transferHookAccountsB } = 
+    await getTransferHookAccountsForPool(
+      rpc,
+      whirlpool.data.tokenMintA,
+      whirlpool.data.tokenMintB,
+      tokenAccountAddresses[whirlpool.data.tokenMintA],
+      tokenAccountAddresses[whirlpool.data.tokenMintB],
+      whirlpool.data.tokenVaultA,
+      whirlpool.data.tokenVaultB,
+      authority.address,
+    );
+
+  // Build remaining accounts info with transfer hook accounts
+  const remainingAccountsInfo = buildTransferHookRemainingAccountsInfo(
+    transferHookAccountsA,
+    transferHookAccountsB,
   );
+
+  const increaseLiquidityInstruction = getIncreaseLiquidityV2Instruction({
+    whirlpool: whirlpool.address,
+    positionAuthority: authority,
+    position: position.address,
+    positionTokenAccount,
+    tokenOwnerAccountA: tokenAccountAddresses[whirlpool.data.tokenMintA],
+    tokenOwnerAccountB: tokenAccountAddresses[whirlpool.data.tokenMintB],
+    tokenVaultA: whirlpool.data.tokenVaultA,
+    tokenVaultB: whirlpool.data.tokenVaultB,
+    tokenMintA: whirlpool.data.tokenMintA,
+    tokenMintB: whirlpool.data.tokenMintB,
+    tokenProgramA: mintA.programAddress,
+    tokenProgramB: mintB.programAddress,
+    tickArrayLower,
+    tickArrayUpper,
+    liquidityAmount: quote.liquidityDelta,
+    tokenMaxA: quote.tokenMaxA,
+    tokenMaxB: quote.tokenMaxB,
+    memoProgram: MEMO_PROGRAM_ADDRESS,
+    remainingAccountsInfo,
+  });
+
+  // Append transfer hook accounts to the instruction
+  const allTransferHookAccounts = getAllTransferHookAccounts(
+    transferHookAccountsA,
+    transferHookAccountsB,
+  );
+  
+  for (const accountMeta of allTransferHookAccounts) {
+    increaseLiquidityInstruction.accounts.push(convertToInstructionAccount(accountMeta));
+  }
+
+  instructions.push(increaseLiquidityInstruction);
 
   instructions.push(...cleanupInstructions);
 
@@ -435,29 +470,58 @@ async function internalOpenPositionInstructions(
     }),
   );
 
-  instructions.push(
-    getIncreaseLiquidityV2Instruction({
-      whirlpool: whirlpool.address,
-      positionAuthority: funder,
-      position: positionAddress[0],
-      positionTokenAccount,
-      tokenOwnerAccountA: tokenAccountAddresses[whirlpool.data.tokenMintA],
-      tokenOwnerAccountB: tokenAccountAddresses[whirlpool.data.tokenMintB],
-      tokenVaultA: whirlpool.data.tokenVaultA,
-      tokenVaultB: whirlpool.data.tokenVaultB,
-      tokenMintA: whirlpool.data.tokenMintA,
-      tokenMintB: whirlpool.data.tokenMintB,
-      tokenProgramA: mintA.programAddress,
-      tokenProgramB: mintB.programAddress,
-      tickArrayLower: lowerTickArrayAddress,
-      tickArrayUpper: upperTickArrayAddress,
-      liquidityAmount: quote.liquidityDelta,
-      tokenMaxA: quote.tokenMaxA,
-      tokenMaxB: quote.tokenMaxB,
-      memoProgram: MEMO_PROGRAM_ADDRESS,
-      remainingAccountsInfo: null,
-    }),
+  // Resolve transfer hook accounts for both token A and B
+  const { transferHookAccountsA, transferHookAccountsB } = 
+    await getTransferHookAccountsForPool(
+      rpc,
+      whirlpool.data.tokenMintA,
+      whirlpool.data.tokenMintB,
+      tokenAccountAddresses[whirlpool.data.tokenMintA],
+      tokenAccountAddresses[whirlpool.data.tokenMintB],
+      whirlpool.data.tokenVaultA,
+      whirlpool.data.tokenVaultB,
+      funder.address,
+    );
+
+  // Build remaining accounts info with transfer hook accounts
+  const remainingAccountsInfo = buildTransferHookRemainingAccountsInfo(
+    transferHookAccountsA,
+    transferHookAccountsB,
   );
+
+  const increaseLiquidityInstruction = getIncreaseLiquidityV2Instruction({
+    whirlpool: whirlpool.address,
+    positionAuthority: funder,
+    position: positionAddress[0],
+    positionTokenAccount,
+    tokenOwnerAccountA: tokenAccountAddresses[whirlpool.data.tokenMintA],
+    tokenOwnerAccountB: tokenAccountAddresses[whirlpool.data.tokenMintB],
+    tokenVaultA: whirlpool.data.tokenVaultA,
+    tokenVaultB: whirlpool.data.tokenVaultB,
+    tokenMintA: whirlpool.data.tokenMintA,
+    tokenMintB: whirlpool.data.tokenMintB,
+    tokenProgramA: mintA.programAddress,
+    tokenProgramB: mintB.programAddress,
+    tickArrayLower: lowerTickArrayAddress,
+    tickArrayUpper: upperTickArrayAddress,
+    liquidityAmount: quote.liquidityDelta,
+    tokenMaxA: quote.tokenMaxA,
+    tokenMaxB: quote.tokenMaxB,
+    memoProgram: MEMO_PROGRAM_ADDRESS,
+    remainingAccountsInfo,
+  });
+
+  // Append transfer hook accounts to the instruction
+  const allTransferHookAccounts = getAllTransferHookAccounts(
+    transferHookAccountsA,
+    transferHookAccountsB,
+  );
+  
+  for (const accountMeta of allTransferHookAccounts) {
+    increaseLiquidityInstruction.accounts.push(convertToInstructionAccount(accountMeta));
+  }
+
+  instructions.push(increaseLiquidityInstruction);
 
   instructions.push(...cleanupInstructions);
 
