@@ -41,8 +41,10 @@ import { MEMO_PROGRAM_ADDRESS } from "@solana-program/memo";
 import { fetchAllMint } from "@solana-program/token-2022";
 import { wrapFunctionWithExecution } from "./actionHelpers";
 import { 
-  getTransferHookAccountsForPool, 
+  getTransferHookAccountsForPool,
   buildTransferHookRemainingAccountsInfo,
+  getAllTransferHookAccounts,
+  convertToInstructionAccount,
 } from "./transferHook";
 
 // TODO: allow specify number as well as bigint
@@ -365,7 +367,16 @@ export async function swapInstructions<T extends SwapParams>(
     remainingAccountsInfo,
   });
 
-  // Add supplemental tick arrays
+  // IMPORTANT: Append remaining accounts in the same order as slices
+  // 1) TransferHookA accounts
+  for (const meta of transferHookAccountsA) {
+    swapInstruction.accounts.push(convertToInstructionAccount(meta));
+  }
+  // 2) TransferHookB accounts
+  for (const meta of transferHookAccountsB) {
+    swapInstruction.accounts.push(convertToInstructionAccount(meta));
+  }
+  // 3) Supplemental tick arrays
   swapInstruction.accounts.push(
     { address: tickArrays[3].address, role: AccountRole.WRITABLE },
     { address: tickArrays[4].address, role: AccountRole.WRITABLE },

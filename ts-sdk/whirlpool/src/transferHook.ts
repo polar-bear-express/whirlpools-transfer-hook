@@ -126,13 +126,21 @@ export async function getTransferHookAccounts(
     // Create a simple RPC adapter for the connection parameter
     const connection = {
       getAccountInfo: async (pubkey: PublicKey) => {
-        const result = await rpc.getAccountInfo(pubkey.toString() as Address).send();
-        return result.value ? {
-          data: Buffer.from(result.value.data),
-          executable: result.value.executable,
-          lamports: result.value.lamports,
-          owner: new PublicKey(result.value.owner),
-        } : null;
+        // Always request base64 so we can decode reliably
+        const resp = await (rpc as any).getAccountInfo(pubkey.toString() as Address, { encoding: "base64" }).send();
+        if (!resp.value) return null;
+
+        // resp.value.data is [data, encoding]
+        const dataTuple = resp.value.data as unknown as [string, string];
+        const dataStr = dataTuple?.[0] as string;
+        const dataBuf = Buffer.from(dataStr, "base64");
+
+        return {
+          data: dataBuf,
+          executable: Boolean(resp.value.executable),
+          lamports: Number(resp.value.lamports),
+          owner: new PublicKey(resp.value.owner),
+        };
       },
     };
 
@@ -151,15 +159,15 @@ export async function getTransferHookAccounts(
 
     // Extract the extra accounts (everything after the first 5 basic accounts)
     const extraAccountMetas = instruction.keys.slice(5);
-    
+
     // Convert back to our IAccountMeta format
     const result = extraAccountMetas.map(meta => ({
       address: meta.pubkey.toString() as Address,
-      role: meta.isWritable 
+      role: meta.isWritable
         ? (meta.isSigner ? AccountRole.WRITABLE_SIGNER : AccountRole.WRITABLE)
         : (meta.isSigner ? AccountRole.READONLY_SIGNER : AccountRole.READONLY),
     }));
-    
+
     return result;
   } catch (error) {
     // If we can't resolve transfer hook accounts, return empty array

@@ -426,7 +426,7 @@ async function internalOpenPositionInstructions(
         funder,
         tickArray: lowerTickArrayAddress,
         startTickIndex: lowerTickArrayIndex,
-        idempotent: false,
+        idempotent: true,
       }),
     );
     nonRefundableRent += calculateMinimumBalanceForRentExemption(
@@ -442,7 +442,7 @@ async function internalOpenPositionInstructions(
         funder,
         tickArray: upperTickArrayAddress,
         startTickIndex: upperTickArrayIndex,
-        idempotent: false,
+        idempotent: true,
       }),
     );
     nonRefundableRent += calculateMinimumBalanceForRentExemption(

@@ -203,11 +203,14 @@ describe("Transfer Hook Support", () => {
     it("should increase liquidity on existing position with transfer hook tokens", async () => {
       // Create pool and position first
       const { poolAddress } = await createSplashPoolInstructions(rpc, mintA, mintB, 1.0);
-      const { positionMint } = await openFullRangePositionInstructions(
+      const { positionMint, instructions: openInstructions } = await openFullRangePositionInstructions(
         rpc,
         poolAddress,
         { tokenA: 1000000n }
       );
+
+      // Send the open position transaction so the position account exists on-chain
+      await sendTransaction(openInstructions);
 
       // Now increase liquidity
       const param = { tokenA: 500000n };
