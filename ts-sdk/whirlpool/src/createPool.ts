@@ -7,6 +7,7 @@ import {
   getTokenBadgeAddress,
   getWhirlpoolAddress,
   getWhirlpoolSize,
+  fetchMaybeWhirlpool,
 } from "@orca-so/whirlpools-client";
 import type {
   Address,
@@ -194,24 +195,28 @@ export async function createConcentratedLiquidityPoolInstructions(
     generateKeyPairSigner(),
   ]);
 
-  instructions.push(
-    getInitializePoolV2Instruction({
-      whirlpoolsConfig: WHIRLPOOLS_CONFIG_ADDRESS,
-      tokenMintA,
-      tokenMintB,
-      tokenBadgeA,
-      tokenBadgeB,
-      funder,
-      whirlpool: poolAddress,
-      tokenVaultA,
-      tokenVaultB,
-      tokenProgramA,
-      tokenProgramB,
-      feeTier,
-      tickSpacing,
-      initialSqrtPrice,
-    }),
-  );
+  // Guard: if the pool account already exists, skip InitializePoolV2 to avoid Alloc error (0x0)
+  const maybeExistingPool = await fetchMaybeWhirlpool(rpc, poolAddress);
+  if (!maybeExistingPool.exists) {
+    instructions.push(
+      getInitializePoolV2Instruction({
+        whirlpoolsConfig: WHIRLPOOLS_CONFIG_ADDRESS,
+        tokenMintA,
+        tokenMintB,
+        tokenBadgeA,
+        tokenBadgeB,
+        funder,
+        whirlpool: poolAddress,
+        tokenVaultA,
+        tokenVaultB,
+        tokenProgramA,
+        tokenProgramB,
+        feeTier,
+        tickSpacing,
+        initialSqrtPrice,
+      }),
+    );
+  }
 
   nonRefundableRent += calculateMinimumBalanceForRentExemption(
     rent,
@@ -258,7 +263,7 @@ export async function createConcentratedLiquidityPoolInstructions(
         funder,
         tickArray: tickArrayAddresses[i],
         startTickIndex: tickArrayIndexes[i],
-        idempotent: false,
+        idempotent: true, // allow re-run in tests without Alloc errors
       }),
     );
     nonRefundableRent += calculateMinimumBalanceForRentExemption(

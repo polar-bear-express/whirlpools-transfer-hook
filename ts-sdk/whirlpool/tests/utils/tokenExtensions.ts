@@ -9,12 +9,15 @@ import {
   getInitializeTransferFeeConfigInstruction,
   getSetTransferFeeInstruction,
   getInitializeScaledUiAmountMintInstruction,
+  getInitializeTransferHookInstruction,
 } from "@solana-program/token-2022";
 import type { Address, IInstruction } from "@solana/kit";
+import { address } from "@solana/kit";
 import { sendTransaction, signer } from "./mockRpc";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import { DEFAULT_ADDRESS } from "../../src/config";
 import { getNextKeypair } from "./keypair";
+import { TEST_TRANSFER_HOOK_PROGRAM_ID } from "./transferHooks";
 
 export async function setupAtaTE(
   mint: Address,
@@ -93,6 +96,15 @@ export async function setupMintTE(
           }),
         );
         break;
+      case "TransferHook":
+        instructions.push(
+          getInitializeTransferHookInstruction({
+            mint: keypair.address,
+            authority: extension.authority,
+            programId: extension.programId,
+          }),
+        );
+        break;
     }
   }
 
@@ -163,6 +175,28 @@ export async function setupMintTEScaledUiAmount(
         newMultiplierEffectiveTimestamp: 0n,
         multiplier: 1,
         newMultiplier: 1,
+      },
+    ],
+  });
+}
+
+/**
+ * Creates a Token-2022 mint with transfer hook extension.
+ * This is a convenience function that uses the generic setupMintTE with transfer hook configuration.
+ * 
+ * @param config Configuration for the mint
+ * @returns The mint address
+ */
+export async function setupMintTETransferHook(
+  config: { decimals?: number } = {},
+): Promise<Address> {
+  return setupMintTE({
+    ...config,
+    extensions: [
+      {
+        __kind: "TransferHook",
+        authority: signer.address,
+        programId: address(TEST_TRANSFER_HOOK_PROGRAM_ID),
       },
     ],
   });

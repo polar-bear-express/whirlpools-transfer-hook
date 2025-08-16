@@ -40,6 +40,12 @@ import {
 import { MEMO_PROGRAM_ADDRESS } from "@solana-program/memo";
 import { fetchAllMint } from "@solana-program/token-2022";
 import { wrapFunctionWithExecution } from "./actionHelpers";
+import { 
+  getTransferHookAccountsForPool,
+  buildTransferHookRemainingAccountsInfo,
+  getAllTransferHookAccounts,
+  convertToInstructionAccount,
+} from "./transferHook";
 
 // TODO: allow specify number as well as bigint
 // TODO: transfer hook
@@ -314,6 +320,29 @@ export async function swapInstructions<T extends SwapParams>(
   const otherAmountThreshold =
     "tokenMaxIn" in quote ? quote.tokenMaxIn : quote.tokenMinOut;
 
+  // Resolve transfer hook accounts for both token A and B
+  const { transferHookAccountsA, transferHookAccountsB } = 
+    await getTransferHookAccountsForPool(
+      rpc,
+      whirlpool.data.tokenMintA,
+      whirlpool.data.tokenMintB,
+      tokenAccountAddresses[whirlpool.data.tokenMintA],
+      tokenAccountAddresses[whirlpool.data.tokenMintB],
+      whirlpool.data.tokenVaultA,
+      whirlpool.data.tokenVaultB,
+      signer.address,
+    );
+
+  // Build remaining accounts info with transfer hook accounts and supplemental tick arrays
+  const remainingAccountsInfo = buildTransferHookRemainingAccountsInfo(
+    transferHookAccountsA,
+    transferHookAccountsB,
+    [
+      { address: tickArrays[3].address, role: AccountRole.WRITABLE },
+      { address: tickArrays[4].address, role: AccountRole.WRITABLE },
+    ],
+  );
+
   const swapInstruction = getSwapV2Instruction({
     tokenProgramA: tokenA.programAddress,
     tokenProgramB: tokenB.programAddress,
@@ -335,13 +364,19 @@ export async function swapInstructions<T extends SwapParams>(
     amountSpecifiedIsInput: specifiedInput,
     aToB,
     oracle: oracleAddress,
-    remainingAccountsInfo: {
-      slices: [
-        { accountsType: AccountsType.SupplementalTickArrays, length: 2 },
-      ],
-    },
+    remainingAccountsInfo,
   });
 
+  // IMPORTANT: Append remaining accounts in the same order as slices
+  // 1) TransferHookA accounts
+  for (const meta of transferHookAccountsA) {
+    swapInstruction.accounts.push(convertToInstructionAccount(meta));
+  }
+  // 2) TransferHookB accounts
+  for (const meta of transferHookAccountsB) {
+    swapInstruction.accounts.push(convertToInstructionAccount(meta));
+  }
+  // 3) Supplemental tick arrays
   swapInstruction.accounts.push(
     { address: tickArrays[3].address, role: AccountRole.WRITABLE },
     { address: tickArrays[4].address, role: AccountRole.WRITABLE },
